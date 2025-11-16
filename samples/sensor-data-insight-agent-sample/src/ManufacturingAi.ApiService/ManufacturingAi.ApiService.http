@@ -1,0 +1,13 @@
+﻿@ApiService_HostAddress = http://localhost:5308
+
+POST {{ApiService_HostAddress}}/analyze/
+Content-Type: application/json
+Accept: application/json
+
+{
+  "RawData": "時刻,機械ID,温度(℃),圧力(MPa),振動レベル,状態\n2025-11-12 09:00:00,M001,45.2,2.1,0.8,Normal\n2025-11-12 09:15:00,M001,82.5,3.4,1.9,Critical\n2025-11-12 09:30:00,M002,38.1,1.8,0.6,Normal\n2025-11-12 09:45:00,M002,71.3,2.9,1.5,Warning\n2025-11-12 10:00:00,M003,44.8,2.0,0.7,Normal"
+}
+
+###
+GET {{ApiService_HostAddress}}/health/
+Accept: application/json

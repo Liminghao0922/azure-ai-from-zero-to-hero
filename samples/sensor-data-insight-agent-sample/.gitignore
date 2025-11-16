@@ -1,0 +1,35 @@
+# Azure deployment artifacts
+.azure/
+
+# User-specific files
+*.user
+*.suo
+*.userosscache
+
+# Build outputs
+bin/
+obj/
+[Dd]ebug/
+[Rr]elease/
+
+# .NET Aspire settings
+.aspire/
+
+# Environment files with secrets
+appsettings.Development.json
+appsettings.*.json
+!appsettings.json.example
+
+# VS Code
+.vscode/
+!.vscode/launch.json
+
+# Visual Studio
+.vs/
+
+# Logs
+*.log
+
+# OS files
+.DS_Store
+Thumbs.db

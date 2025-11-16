@@ -1,0 +1,685 @@
+﻿@page "/"
+@rendermode InteractiveServer
+@inject Services.SensorParser Parser
+@inject Services.AnalyzeAiClient Api
+@inject IJSRuntime JS
+
+<PageTitle>製造業 AI チャット</PageTitle>
+
+<div class="chat-container">
+    <div class="chat-header">
+        <h1>🏭 製造業 AI アシスタント</h1>
+        <p>製造データを分析し、質問に答えます</p>
+    </div>
+
+    <div class="chat-sidebar">
+        <h3>📊 データアップロード</h3>
+        <InputFile OnChange="OnFileChange" accept=".csv,.txt" class="file-input" />
+        <textarea @bind="RawText" rows="6" class="data-textarea" 
+                  placeholder="時刻,機械ID,温度(℃),圧力(MPa),振動レベル,状態&#10;2025-11-12 09:00:00,M001,45.2,2.1,0.8,Normal"></textarea>
+        <button class="btn btn-secondary" @onclick="ParseAndLoadData" disabled="@(IsBusy)">
+            📁 データ読込
+        </button>
+        
+        @if (Messages.Any())
+        {
+            <button class="btn btn-secondary btn-clear" @onclick="ClearSession" disabled="@(IsBusy)">
+                🗑️ チャットクリア
+            </button>
+        }
+        
+        @if (Summary != null)
+        {
+            <div class="data-summary">
+                <h4>データ概要</h4>
+                <div class="summary-stats">
+                    <span>📋 レコード: @Summary.TotalRecords</span>
+                    <span>🏭 機械数: @Summary.MachineCount</span>
+                </div>
+            </div>
+        }
+    </div>
+
+    <div class="chat-main">
+        <div class="chat-messages" @ref="messagesContainer">
+            @if (!Messages.Any())
+            {
+                <div class="welcome-message">
+                    <h2>👋 ようこそ！</h2>
+                    <p>製造データをアップロードして、AIに質問してください。</p>
+                    <div class="example-prompts">
+                        <p><strong>例えば：</strong></p>
+                        <button class="prompt-btn" @onclick="@(() => SetUserInput("このデータを分析して、異常がないか教えてください"))">
+                            このデータを分析して、異常がないか教えてください
+                        </button>
+                        <button class="prompt-btn" @onclick="@(() => SetUserInput("温度が最も高い機械はどれですか？"))">
+                            温度が最も高い機械はどれですか？
+                        </button>
+                        <button class="prompt-btn" @onclick="@(() => SetUserInput("予防保全のための推奨事項を教えてください"))">
+                            予防保全のための推奨事項を教えてください
+                        </button>
+                    </div>
+                </div>
+            }
+
+            @foreach (var msg in Messages)
+            {
+                <div class="message @(msg.Role)-message @(msg.IsError ? "error-message" : "")">
+                    <div class="message-icon">
+                        @if (msg.Role == "user")
+                        {
+                            <span>👤</span>
+                        }
+                        else if (msg.IsError)
+                        {
+                            <span>⚠️</span>
+                        }
+                        else
+                        {
+                            <span>🤖</span>
+                        }
+                    </div>
+                    <div class="message-content">
+                        <div class="message-header">
+                            <span class="message-role">@(msg.Role == "user" ? "あなた" : msg.IsError ? "エラー" : "AI アシスタント")</span>
+                            <span class="message-time">@msg.Timestamp.ToString("HH:mm")</span>
+                        </div>
+                        <div class="message-text">@msg.Content</div>
+                    </div>
+                </div>
+            }
+
+            @if (IsBusy)
+            {
+                <div class="message assistant-message typing">
+                    <div class="message-icon"><span>🤖</span></div>
+                    <div class="message-content">
+                        <div class="message-header">
+                            <span class="message-role">AI アシスタント</span>
+                        </div>
+                        <div class="message-text">
+                            <span class="typing-indicator">
+                                <span></span><span></span><span></span>
+                            </span>
+                            処理中...
+                        </div>
+                    </div>
+                </div>
+            }
+        </div>
+
+        <div class="chat-input-area">
+            <div class="input-wrapper">
+                <textarea @bind="UserInput" 
+                          @bind:event="oninput"
+                          @onkeydown="HandleKeyDown"
+                          rows="1" 
+                          class="chat-input" 
+                          placeholder="メッセージを入力してください..."
+                          disabled="@(IsBusy || string.IsNullOrWhiteSpace(RawText))"></textarea>
+                <button class="btn btn-send" @onclick="SendMessage" disabled="@(IsBusy || string.IsNullOrWhiteSpace(UserInput) || string.IsNullOrWhiteSpace(RawText))">
+                    <span>送信 📤</span>
+                </button>
+            </div>
+            <div class="input-footer">
+                @if (string.IsNullOrWhiteSpace(RawText))
+                {
+                    <small class="input-hint">💡 まずデータをアップロードしてください</small>
+                }
+                <div class="prompt-suggestions">
+                    <button class="suggestion-btn" @onclick="@(() => SetUserInput("このデータを分析して、異常がないか教えてください"))" disabled="@(IsBusy || string.IsNullOrWhiteSpace(RawText))">
+                        <span class="suggestion-icon">💡</span>
+                        <span>異常分析</span>
+                    </button>
+                    <button class="suggestion-btn" @onclick="@(() => SetUserInput("温度が最も高い機械はどれですか？"))" disabled="@(IsBusy || string.IsNullOrWhiteSpace(RawText))">
+                        <span class="suggestion-icon">🌡️</span>
+                        <span>温度確認</span>
+                    </button>
+                    <button class="suggestion-btn" @onclick="@(() => SetUserInput("予防保全のための推奨事項を教えてください"))" disabled="@(IsBusy || string.IsNullOrWhiteSpace(RawText))">
+                        <span class="suggestion-icon">🔧</span>
+                        <span>保全推奨</span>
+                    </button>
+                    <button class="suggestion-btn" @onclick="@(() => SetUserInput("振動レベルが高い機械を特定してください"))" disabled="@(IsBusy || string.IsNullOrWhiteSpace(RawText))">
+                        <span class="suggestion-icon">📊</span>
+                        <span>振動分析</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+    .chat-container {
+        display: grid;
+        grid-template-columns: 300px 1fr;
+        grid-template-rows: auto 1fr;
+        height: calc(100vh - 4rem);
+        gap: 0;
+        background: #f5f5f5;
+    }
+
+    .chat-header {
+        grid-column: 1 / -1;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        padding: 1.5rem;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    }
+
+    .chat-header h1 {
+        margin: 0;
+        font-size: 1.5rem;
+    }
+
+    .chat-header p {
+        margin: 0.5rem 0 0 0;
+        opacity: 0.9;
+    }
+
+    .chat-sidebar {
+        background: white;
+        padding: 1.5rem;
+        overflow-y: auto;
+        border-right: 1px solid #e0e0e0;
+    }
+
+    .chat-sidebar h3 {
+        margin-top: 0;
+        color: #333;
+    }
+
+    .file-input {
+        margin-bottom: 1rem;
+        width: 100%;
+    }
+
+    .data-textarea {
+        width: 100%;
+        padding: 0.75rem;
+        border: 1px solid #ddd;
+        border-radius: 8px;
+        font-family: 'Consolas', monospace;
+        font-size: 0.85rem;
+        resize: vertical;
+        margin-bottom: 1rem;
+    }
+
+    .data-summary {
+        margin-top: 1.5rem;
+        padding: 1rem;
+        background: #f8f9fa;
+        border-radius: 8px;
+        border-left: 4px solid #667eea;
+    }
+
+    .data-summary h4 {
+        margin: 0 0 0.5rem 0;
+        color: #667eea;
+    }
+
+    .summary-stats {
+        display: flex;
+        flex-direction: column;
+        gap: 0.5rem;
+        font-size: 0.9rem;
+    }
+
+    .chat-main {
+        display: flex;
+        flex-direction: column;
+        background: white;
+        overflow: hidden;
+    }
+
+    .chat-messages {
+        flex: 1;
+        overflow-y: auto;
+        padding: 2rem;
+        display: flex;
+        flex-direction: column;
+        gap: 1rem;
+    }
+
+    .welcome-message {
+        text-align: center;
+        padding: 3rem 2rem;
+        color: #666;
+    }
+
+    .welcome-message h2 {
+        color: #667eea;
+        margin-bottom: 0.5rem;
+    }
+
+    .example-prompts {
+        margin-top: 2rem;
+        display: flex;
+        flex-direction: column;
+        gap: 0.75rem;
+        align-items: center;
+    }
+
+    .prompt-btn {
+        padding: 0.75rem 1.5rem;
+        background: white;
+        border: 2px solid #667eea;
+        border-radius: 12px;
+        color: #667eea;
+        cursor: pointer;
+        transition: all 0.2s;
+        max-width: 400px;
+        text-align: left;
+    }
+
+    .prompt-btn:hover {
+        background: #667eea;
+        color: white;
+        transform: translateY(-2px);
+        box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
+    }
+
+    .message {
+        display: flex;
+        gap: 0.75rem;
+        animation: fadeIn 0.3s ease-in;
+    }
+
+    @@keyframes fadeIn {
+        from { opacity: 0; transform: translateY(10px); }
+        to { opacity: 1; transform: translateY(0); }
+    }
+
+    .message-icon {
+        flex-shrink: 0;
+        width: 40px;
+        height: 40px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: 50%;
+        font-size: 1.25rem;
+    }
+
+    .user-message .message-icon {
+        background: #667eea;
+    }
+
+    .assistant-message .message-icon {
+        background: #48bb78;
+    }
+
+    .error-message .message-icon {
+        background: #f56565;
+    }
+
+    .message-content {
+        flex: 1;
+        min-width: 0;
+    }
+
+    .message-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 0.25rem;
+    }
+
+    .message-role {
+        font-weight: 600;
+        font-size: 0.9rem;
+        color: #333;
+    }
+
+    .message-time {
+        font-size: 0.75rem;
+        color: #999;
+    }
+
+    .message-text {
+        background: #f8f9fa;
+        padding: 1rem;
+        border-radius: 12px;
+        line-height: 1.6;
+        white-space: pre-wrap;
+        word-break: break-word;
+    }
+
+    .user-message .message-text {
+        background: #667eea;
+        color: white;
+    }
+
+    .assistant-message .message-text {
+        background: #f8f9fa;
+        color: #333;
+    }
+
+    .error-message .message-text {
+        background: #fff5f5;
+        color: #c53030;
+        border: 1px solid #feb2b2;
+    }
+
+    .typing-indicator {
+        display: inline-flex;
+        gap: 4px;
+        margin-right: 8px;
+    }
+
+    .typing-indicator span {
+        width: 8px;
+        height: 8px;
+        background: #667eea;
+        border-radius: 50%;
+        animation: typing 1.4s infinite;
+    }
+
+    .typing-indicator span:nth-child(2) {
+        animation-delay: 0.2s;
+    }
+
+    .typing-indicator span:nth-child(3) {
+        animation-delay: 0.4s;
+    }
+
+    @@keyframes typing {
+        0%, 60%, 100% { transform: translateY(0); }
+        30% { transform: translateY(-10px); }
+    }
+
+    .chat-input-area {
+        padding: 1.5rem;
+        border-top: 1px solid #e0e0e0;
+        background: white;
+    }
+
+    .input-wrapper {
+        display: flex;
+        gap: 0.75rem;
+        align-items: flex-end;
+    }
+
+    .chat-input {
+        flex: 1;
+        padding: 0.75rem 1rem;
+        border: 2px solid #e0e0e0;
+        border-radius: 12px;
+        font-size: 1rem;
+        resize: none;
+        font-family: inherit;
+        transition: border-color 0.2s;
+        max-height: 120px;
+    }
+
+    .chat-input:focus {
+        outline: none;
+        border-color: #667eea;
+    }
+
+    .chat-input:disabled {
+        background: #f5f5f5;
+        cursor: not-allowed;
+    }
+
+    .input-footer {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-top: 0.75rem;
+        gap: 1rem;
+    }
+
+    .input-hint {
+        color: #999;
+        font-size: 0.85rem;
+        flex-shrink: 0;
+    }
+
+    .prompt-suggestions {
+        display: flex;
+        gap: 0.5rem;
+        flex-wrap: wrap;
+        justify-content: flex-end;
+    }
+
+    .suggestion-btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.35rem;
+        padding: 0.4rem 0.75rem;
+        background: #f8f9fa;
+        border: 1px solid #e0e0e0;
+        border-radius: 16px;
+        color: #667eea;
+        font-size: 0.85rem;
+        cursor: pointer;
+        transition: all 0.2s;
+        white-space: nowrap;
+    }
+
+    .suggestion-btn:hover:not(:disabled) {
+        background: #667eea;
+        color: white;
+        border-color: #667eea;
+        transform: translateY(-1px);
+        box-shadow: 0 2px 8px rgba(102, 126, 234, 0.25);
+    }
+
+    .suggestion-btn:disabled {
+        opacity: 0.4;
+        cursor: not-allowed;
+    }
+
+    .suggestion-icon {
+        font-size: 1rem;
+        line-height: 1;
+    }
+
+    .btn {
+        padding: 0.75rem 1.5rem;
+        border: none;
+        border-radius: 8px;
+        font-weight: 600;
+        cursor: pointer;
+        transition: all 0.2s;
+        font-size: 1rem;
+    }
+
+    .btn:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+    }
+
+    .btn-secondary {
+        background: #667eea;
+        color: white;
+        width: 100%;
+    }
+
+    .btn-secondary:hover:not(:disabled) {
+        background: #5568d3;
+        transform: translateY(-1px);
+    }
+
+    .btn-clear {
+        margin-top: 0.5rem;
+        background: #f56565;
+    }
+
+    .btn-clear:hover:not(:disabled) {
+        background: #e53e3e;
+    }
+
+    .btn-send {
+        background: #667eea;
+        color: white;
+        padding: 0.75rem 2rem;
+    }
+
+    .btn-send:hover:not(:disabled) {
+        background: #5568d3;
+        transform: translateY(-1px);
+        box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
+    }
+
+    @@media (max-width: 768px) {
+        .chat-container {
+            grid-template-columns: 1fr;
+            grid-template-rows: auto auto 1fr;
+        }
+
+        .chat-sidebar {
+            border-right: none;
+            border-bottom: 1px solid #e0e0e0;
+            max-height: 300px;
+        }
+
+        .input-footer {
+            flex-direction: column;
+            align-items: flex-start;
+        }
+
+        .prompt-suggestions {
+            width: 100%;
+            justify-content: flex-start;
+        }
+
+        .suggestion-btn {
+            font-size: 0.8rem;
+            padding: 0.35rem 0.65rem;
+        }
+    }
+</style>
+
+@code {
+private string? RawText;
+private string UserInput = "";
+private Models.DataSummary? Summary;
+private List<Models.ChatMessage> Messages = new();
+private bool IsBusy;
+private ElementReference messagesContainer;
+private string SessionId = Guid.NewGuid().ToString();
+private bool DataSentToSession = false;
+
+    async Task OnFileChange(InputFileChangeEventArgs e)
+    {
+        var file = e.File;
+        using var stream = file.OpenReadStream(maxAllowedSize: 10 * 1024 * 1024); // 10MB limit
+        using var ms = new MemoryStream();
+        await stream.CopyToAsync(ms);
+        RawText = System.Text.Encoding.UTF8.GetString(ms.ToArray());
+        await ParseAndLoadData();
+    }
+
+    async Task ParseAndLoadData()
+    {
+        if (string.IsNullOrWhiteSpace(RawText)) return;
+        
+        try
+        {
+            using var ms = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(RawText));
+            var (records, summary) = await Parser.ParseAsync(ms);
+            Summary = summary;
+            
+            // Mark that data needs to be sent to server on next message
+            DataSentToSession = false;
+            
+            // Add system message about loaded data
+            var summaryText = $"データを読み込みました：\n" +
+                            $"📋 総レコード: {summary.TotalRecords}\n" +
+                            $"🏭 機械数: {summary.MachineCount}\n\n" +
+                            $"質問を入力してください。";
+            
+            Messages.Add(new Models.ChatMessage("assistant", summaryText, DateTime.Now));
+            StateHasChanged();
+            await ScrollToBottom();
+        }
+        catch (Exception ex)
+        {
+            Messages.Add(new Models.ChatMessage("assistant", $"データの読み込みに失敗しました: {ex.Message}", DateTime.Now, true));
+        }
+    }
+
+    void SetUserInput(string prompt)
+    {
+        UserInput = prompt;
+        StateHasChanged();
+    }
+
+    async Task HandleKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter" && !e.ShiftKey)
+        {
+            await SendMessage();
+        }
+    }
+
+    async Task SendMessage()
+    {
+        if (string.IsNullOrWhiteSpace(UserInput) || string.IsNullOrWhiteSpace(RawText) || IsBusy) 
+            return;
+
+        var userMessage = UserInput.Trim();
+        UserInput = "";
+        
+        // Add user message
+        Messages.Add(new Models.ChatMessage("user", userMessage, DateTime.Now));
+        StateHasChanged();
+        await ScrollToBottom();
+
+        IsBusy = true;
+        StateHasChanged();
+
+        try
+        {
+            // Send raw data only on first message or when data changes
+            string? dataToSend = DataSentToSession ? null : RawText;
+            
+            // Call AI with session ID
+            var result = await Api.AnalyzeAsync(SessionId, dataToSend, userMessage);
+            Messages.Add(new Models.ChatMessage("assistant", result, DateTime.Now));
+            
+            // Mark that data has been sent
+            DataSentToSession = true;
+        }
+        catch (Exception ex)
+        {
+            Messages.Add(new Models.ChatMessage("assistant", $"エラーが発生しました: {ex.Message}", DateTime.Now, true));
+        }
+        finally
+        {
+            IsBusy = false;
+            StateHasChanged();
+            await ScrollToBottom();
+        }
+    }
+
+    async Task ClearSession()
+    {
+        try
+        {
+            await Api.ClearSessionAsync(SessionId);
+            
+            // Create new session
+            SessionId = Guid.NewGuid().ToString();
+            DataSentToSession = false;
+            Messages.Clear();
+            
+            StateHasChanged();
+        }
+        catch (Exception ex)
+        {
+            Messages.Add(new Models.ChatMessage("assistant", $"セッションのクリアに失敗しました: {ex.Message}", DateTime.Now, true));
+        }
+    }
+
+    async Task ScrollToBottom()
+    {
+        try
+        {
+            await JS.InvokeVoidAsync("eval", "document.querySelector('.chat-messages').scrollTop = document.querySelector('.chat-messages').scrollHeight");
+        }
+        catch { /* Ignore JS errors */ }
+    }
+}

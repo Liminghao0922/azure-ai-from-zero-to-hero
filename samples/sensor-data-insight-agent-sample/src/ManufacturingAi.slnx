@@ -1,0 +1,6 @@
+<Solution>
+  <Project Path="ManufacturingAi.ApiService/ManufacturingAi.ApiService.csproj" />
+  <Project Path="ManufacturingAi.AppHost/ManufacturingAi.AppHost.csproj" />
+  <Project Path="ManufacturingAi.ServiceDefaults/ManufacturingAi.ServiceDefaults.csproj" />
+  <Project Path="ManufacturingAi.Web/ManufacturingAi.Web.csproj" />
+</Solution>
