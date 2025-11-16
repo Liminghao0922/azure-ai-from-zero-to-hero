@@ -61,3 +61,16 @@ azure-ai-from-zero-to-hero/
 ├── docs/          # Articles/Explanations (markdown)
 ├── images/        # Architecture diagrams and figures
 └── README.md
+This structure will grow as the series progresses.
+
+
+## 🤝 Contributions?
+
+This is primarily a self-improvement project,
+so the roadmap and direction follow my own study plan.
+
+But PRs that fix issues, improve clarity, or add useful references are welcome.
+
+## ⭐ If this repo helps you, consider giving it a star!
+
+More updates coming soon. Stayed tuned :)
